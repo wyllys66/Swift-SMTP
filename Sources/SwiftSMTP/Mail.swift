@@ -39,6 +39,9 @@ public struct Mail {
     /// Text of the `Mail`. Defaults to none.
     public let text: String
 
+    /// Is this PGP/MIME.?  Defaults to none.
+    public let pgp: Bool
+    
     /// Array of `Attachment`s for the `Mail`. If the `Mail` has multiple `Attachment`s that are alternatives to plain
     /// text, the last one will be used as the alternative (all the `Attachments` will still be sent). Defaults to none.
     public let attachments: [Attachment]
@@ -88,6 +91,7 @@ public struct Mail {
                 bcc: [User] = [],
                 subject: String = "",
                 text: String = "",
+                pgp: Bool = false,
                 attachments: [Attachment] = [],
                 additionalHeaders: [String: String] = [:]) {
         self.from = from
@@ -96,7 +100,7 @@ public struct Mail {
         self.bcc = bcc
         self.subject = subject
         self.text = text
-
+        self.pgp = pgp
         let (alternative, attachments) = Mail.getAlternative(attachments)
         self.alternative = alternative
         self.attachments = attachments
@@ -143,7 +147,7 @@ public struct Mail {
         return dictionary
     }
 
-    var headersString: String {
+    public var headersString: String {
         return headersDictionary.map { (key, value) in
             return "\(key): \(value)"
             }.joined(separator: CRLF)

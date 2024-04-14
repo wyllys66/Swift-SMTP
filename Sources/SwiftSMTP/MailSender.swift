@@ -27,8 +27,9 @@ public typealias Progress = ((Mail, Error?) -> Void)?
 ///  sent `Mail`s. [(`Mail`, `Error`)] is an array of failed `Mail`s and their corresponding `Error`s.
 public typealias Completion = (([Mail], [(Mail, Error)]) -> Void)?
 
-class MailSender {
-    private var socket: SMTPSocket
+public class MailSender {
+    private var socket: SMTPSocket?
+    private var stream: OutputStream?
     private var mailsToSend: [Mail]
     private var progress: Progress
     private var completion: Completion
@@ -41,16 +42,33 @@ class MailSender {
          progress: Progress,
          completion: Completion) {
         self.socket = socket
+        self.stream = nil
         self.mailsToSend = mailsToSend
         self.progress = progress
         self.completion = completion
         dataSender = DataSender(socket: socket)
     }
 
+    public init(stream: OutputStream,
+         mailsToSend: [Mail],
+         progress: Progress,
+         completion: Completion) {
+        self.socket = nil
+        self.mailsToSend = mailsToSend
+        self.progress = progress
+        self.completion = completion
+        self.stream = stream;
+        dataSender = DataSender(stream: stream)
+    }
+    
     func send() {
         DispatchQueue.global().async {
             self.sendNext()
         }
+    }
+    
+    public func render(_ mail: Mail) throws {
+        try dataSender.send(mail, includeHeaders: false)
     }
 }
 
@@ -81,12 +99,15 @@ private extension MailSender {
         }
     }
 
-    func quit() throws {
-        try socket.send(.quit)
-        socket.close()
+    public func quit() throws {
+        if (socket != nil) {
+            try socket?.send(.quit)
+            socket?.close()
+        }
     }
 
-    func send(_ mail: Mail) throws {
+    
+    public func send(_ mail: Mail) throws {
         let recipientEmails = try getRecipientEmails(from: mail)
         try validateEmails(recipientEmails)
         try sendMail(mail.from.email)
@@ -115,21 +136,21 @@ private extension MailSender {
     }
 
     func sendMail(_ from: String) throws {
-        try socket.send(.mail(from))
+        try socket?.send(.mail(from))
     }
 
     func sendTo(_ emails: [String]) throws {
         for email in emails {
-            try socket.send(.rcpt(email))
+            try socket?.send(.rcpt(email))
         }
     }
 
     func data() throws {
-        try socket.send(.data)
+        try socket?.send(.data)
     }
 
     func dataEnd() throws {
-        try socket.send(.dataEnd)
+        try socket?.send(.dataEnd)
     }
 }
 

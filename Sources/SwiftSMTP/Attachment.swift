@@ -53,6 +53,23 @@ public struct Attachment {
                   relatedAttachments: relatedAttachments)
     }
 
+    /// Initialize a data `Attachment`.
+    ///
+    /// - Parameters:
+    ///     - pgp: PGP/MIME message to be sent in  ASCII Armor format
+    ///     - mime: MIME type of the data.
+    ///     - name: File name which will be presented in the mail.
+    public init(pgp: String,
+                mime: String,
+                name: String) {
+        self.init(type: .pgp(pgp: pgp,
+                             mime: mime,
+                             name: name,
+                             inline: true),
+                  additionalHeaders: [:],
+                  relatedAttachments: [])
+    }
+
     /// Initialize an `Attachment` from a local file.
     ///
     /// - Parameters:
@@ -121,6 +138,7 @@ public struct Attachment {
 extension Attachment {
     enum AttachmentType {
         case data(data: Data, mime: String, name: String, inline: Bool)
+        case pgp(pgp: String, mime: String, name: String, inline: Bool)
         case file(path: String, mime: String, name: String, inline: Bool)
         case html(content: String, characterSet: String, alternative: Bool)
     }
@@ -138,6 +156,17 @@ extension Attachment {
                 attachmentDisposition.append("; filename=\"\(mimeName)\"")
             }
             dictionary["CONTENT-DISPOSITION"] = attachmentDisposition
+            dictionary["CONTENT-TRANSFER-ENCODING"] = "BASE64"
+
+        case .pgp(_, let mime, let name, let inline):
+            dictionary["CONTENT-TYPE"] = mime
+            var attachmentDisposition = inline ? "inline" : "attachment"
+            if name.count > 0 {
+                if let mimeName = name.mimeEncoded {
+                    attachmentDisposition.append("; filename=\"\(mimeName)\"")
+                }
+                dictionary["CONTENT-DISPOSITION"] = attachmentDisposition
+            }
 
         case .file(_, let mime, let name, let inline):
             dictionary["CONTENT-TYPE"] = mime
@@ -146,13 +175,15 @@ extension Attachment {
                 attachmentDisposition.append("; filename=\"\(mimeName)\"")
             }
             dictionary["CONTENT-DISPOSITION"] = attachmentDisposition
+            dictionary["CONTENT-TRANSFER-ENCODING"] = "BASE64"
 
         case .html(_, let characterSet, _):
             dictionary["CONTENT-TYPE"] = "text/html; charset=\(characterSet)"
             dictionary["CONTENT-DISPOSITION"] = "inline"
+            dictionary["CONTENT-TRANSFER-ENCODING"] = "BASE64"
+
         }
 
-        dictionary["CONTENT-TRANSFER-ENCODING"] = "BASE64"
 
         for (key, value) in additionalHeaders {
             let keyUppercased = key.uppercased()
@@ -203,6 +234,11 @@ extension Attachment.AttachmentType: Equatable {
         switch (lhs, rhs) {
         case (let .data(data1, mime1, name1, inline1), let .data(data2, mime2, name2, inline2)):
             return data1 == data2 &&
+                mime1 == mime2 &&
+                name1 == name2 &&
+                inline1 == inline2
+        case (let .pgp(pgp1, mime1, name1, inline1), let .pgp(pgp2, mime2, name2, inline2)):
+            return pgp1 == pgp2 &&
                 mime1 == mime2 &&
                 name1 == name2 &&
                 inline1 == inline2

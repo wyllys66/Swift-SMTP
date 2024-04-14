@@ -22,17 +22,26 @@ import Foundation
 // This is handled by `Sender`.
 struct DataSender {
     // Socket we use to read and write data to
-    private let socket: SMTPSocket
-
+    private let socket: SMTPSocket?
+    private let stream: OutputStream?
+    
     // Init a new instance of `DataSender`
     init(socket: SMTPSocket) {
         self.socket = socket
+        self.stream = nil;
+    }
+    
+    // Init an instance that write to an output stream instead of a socket
+    init(stream: OutputStream) {
+        self.stream = stream;
+        self.socket = nil;
     }
 
     // Send the text and attachments of the `mail`
-    func send(_ mail: Mail) throws {
-        try sendHeaders(mail.headersString)
-
+    func send(_ mail: Mail, includeHeaders: Bool = true) throws {
+        if includeHeaders {
+            try sendHeaders(mail.headersString)
+        }
         if mail.hasAttachment {
             try sendMixed(mail)
         } else {
@@ -51,15 +60,26 @@ extension DataSender {
     func sendText(_ text: String) throws {
         try send(text.embedded)
     }
+    // Add custom/default headers to a `Mail`'s text and write it to the socket.
+    func sendPGP(_ text: String) throws {
+        try send(text);
+    }
 
     // Send `mail`'s content that is more than just plain text
     func sendMixed(_ mail: Mail) throws {
         let boundary = String.makeBoundary()
-        let mixedHeader = String.makeMixedHeader(boundary: boundary)
+        
+        var mixedHeader: String
+        if mail.pgp {
+            mixedHeader = String.makeMixedEncryptedHeader(boundary: boundary)
+        } else {
+            mixedHeader = String.makeMixedHeader(boundary: boundary)
+        }
 
         try send(mixedHeader)
-        try send(boundary.startLine)
-
+        if !mail.pgp || mail.text.count > 0 {
+            try send(boundary.startLine)
+        }
         try sendAlternative(for: mail)
 
         try sendAttachments(mail.attachments, boundary: boundary)
@@ -83,7 +103,15 @@ extension DataSender {
             return
         }
 
-        try sendText(mail.text)
+        if mail.pgp {
+            if mail.text.count > 0 {
+                let pgpheader = String.makePGPContentHeaders()
+                try send(pgpheader)
+                try sendPGP(mail.text + CRLF)
+            }
+        } else {
+            try sendText(mail.text)
+        }
     }
 
     // Sends the attachments of a `Mail`.
@@ -111,6 +139,7 @@ extension DataSender {
 
         switch attachment.type {
         case .data(let data, _, _, _): try sendData(data)
+        case .pgp(let pgp, _, _, _): try sendPGPAttachment(pgp)
         case .file(let path, _, _, _): try sendFile(at: path)
         case .html(let content, _, _): try sendHTML(content)
         }
@@ -122,6 +151,27 @@ extension DataSender {
         }
     }
 
+    // Send a PGP attachment.
+    func sendPGPAttachment(_ pgp: String) throws {
+        #if os(macOS)
+        if let encodedData = cache.object(forKey: pgp as AnyObject) as? Data {
+            return try send(encodedData)
+        }
+        #else
+        if let data = cache.object(forKey: NSString(string: pgp) as AnyObject) as? Data {
+            return try send(data)
+        }
+        #endif
+
+        try send(pgp)
+
+        #if os(macOS)
+            cache.setObject(encodedData as AnyObject, forKey: data as AnyObject)
+        #else
+            cache.setObject(NSString(string: pgp) as AnyObject, forKey: NSString(string: pgp) as AnyObject)
+        #endif
+    }
+
     // Send a data attachment. Data must be base 64 encoded before sending.
     // Checks if the base 64 encoded version has been cached first.
     func sendData(_ data: Data) throws {
@@ -130,6 +180,7 @@ extension DataSender {
                 return try send(encodedData)
             }
         #else
+        
             if let encodedData = cache.object(forKey: NSData(data: data) as AnyObject) as? Data {
                 return try send(encodedData)
             }
@@ -200,14 +251,25 @@ extension DataSender {
 private extension DataSender {
     // Write `text` to the socket.
     func send(_ text: String) throws {
-        print("SEND: \(text)")
-        try socket.write(text)
+        if (socket != nil) {
+            //print("SEND: \(text)")
+            try socket?.write(text)
+        } else if (stream != nil) {
+            //print("STREAM: \(text)")
+            let final = text + CRLF
+            try self.stream?.write(final.data(using: .utf8)!)
+        }
     }
 
-    // Write `data` to the socket.
+    // Write `data` to the socket or stream.
     func send(_ data: Data) throws {
-        print("SEND: data \(data.count) bytes")
-        try socket.write(data)
+        if (socket != nil) {
+            //print("SEND: data \(data.count) bytes")
+            try socket?.write(data)
+        } else if (stream != nil) {
+            //print("STREAM: data \(data.count) bytes")
+            try self.stream?.write(data)
+        }
     }
 }
 
@@ -225,6 +287,14 @@ private extension String {
     // The SMTP protocol requires unique boundaries between sections of an email.
     static func makeBoundary() -> String {
         return UUID().uuidString.replacingOccurrences(of: "-", with: "")
+    }
+
+    static func makeMixedEncryptedHeader(boundary: String) -> String {
+        return "CONTENT-TYPE: multipart/encrypted; boundary=\"\(boundary)\"; protocol=\"application/pgp-encrypted\"\(CRLF)"
+    }
+    
+    static func makePGPContentHeaders() -> String {
+        return "CONTENT-TYPE: text/plain; charset=\"utf-8\"\(CRLF)CONTENT-TRANSFER-ENCODING: 7bit\(CRLF)CONTENT-DISPOSITION: inline\(CRLF)"
     }
 
     // Header for a mixed type email.
@@ -251,5 +321,34 @@ private extension String {
     // Added to a boundary to indicate the end of the corresponding section.
     var endLine: String {
         return "--\(self)--"
+    }
+}
+
+extension OutputStream {
+
+    func write(_ data: Data) throws {
+        var remaining = data[...]
+        while !remaining.isEmpty {
+            let bytesWritten = remaining.withUnsafeBytes { buf in
+                // The force unwrap is safe because we know that `remaining` is
+                // not empty. The `assumingMemoryBound(to:)` is there just to
+                // make Swift’s type checker happy. This would be unnecessary if
+                // `write(_:maxLength:)` were (as it should be IMO) declared
+                // using `const void *` rather than `const uint8_t *`.
+                self.write(
+                    buf.baseAddress!.assumingMemoryBound(to: UInt8.self),
+                    maxLength: buf.count
+                )
+            }
+            guard bytesWritten >= 0 else {
+                // … if -1, throw `streamError` …
+                // … if 0, well, that’s a complex question …
+                if let error = self.streamError {
+                    print(error.localizedDescription ?? "Unknown error")
+                }
+                fatalError()
+            }
+            remaining = remaining.dropFirst(bytesWritten)
+        }
     }
 }

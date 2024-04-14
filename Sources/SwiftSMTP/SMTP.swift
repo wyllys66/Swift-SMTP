@@ -41,7 +41,7 @@ public struct SMTP {
 
         /// Expect a STARTTLS command from the server and require the connection is upgraded to TLS. Will throw if the server does not issue a STARTTLS command.
         case requireSTARTTLS
-    }
+    };
 
     /// Initializes an `SMTP` instance.
     ///
@@ -93,19 +93,37 @@ public struct SMTP {
         self.timeout = timeout
     }
 
+    /// Verify Auth Credentials.
+    ///
+    /// - Parameters:
+    ///     - completion: Callback when sending finishes. `Error` is nil on success. (optional)
+
     /// Send an email.
     ///
     /// - Parameters:
     ///     - mail: `Mail` object to send.
     ///     - completion: Callback when sending finishes. `Error` is nil on success. (optional)
-    public func send(_ mail: Mail, completion: ((Error?) -> Void)? = nil) {
-        send([mail], completion:  { (_, failed) in
-            if let error = failed.first?.1 {
-                completion?(error)
-            } else {
-                completion?(nil)
-            }
-        })
+    public func verifyAuth(completion:((_ res: Bool, _ error: Error?) -> Void)) {
+        var res: Bool = false;
+        do {
+            let socket = try SMTPSocket(
+                hostname: hostname,
+                email: email,
+                password: password,
+                port: port,
+                tlsMode: tlsMode,
+                tlsConfiguration: tlsConfiguration,
+                authMethods: authMethods,
+                domainName: domainName,
+                timeout: timeout
+            )
+            res = true;
+        } catch {
+            NSLog("Error: \(error)")
+            completion(false, error);
+            return
+        }
+        completion(res, nil);
     }
 
     /// Send multiple emails.
