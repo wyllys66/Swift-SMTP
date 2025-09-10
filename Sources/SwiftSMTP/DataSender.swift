@@ -277,9 +277,9 @@ private extension String {
     // Embed plain text content of emails with the proper headers so that it is entered correctly.
     var embedded: String {
         var embeddedText = ""
-        embeddedText += "CONTENT-TYPE: text/plain; charset=utf-8\(CRLF)"
-        embeddedText += "CONTENT-TRANSFER-ENCODING: 7bit\(CRLF)"
-        embeddedText += "CONTENT-DISPOSITION: inline\(CRLF)"
+        embeddedText += "Content-Type: text/plain; charset=utf-8\(CRLF)"
+        embeddedText += "Content-Transfer-Encoding: 7bit\(CRLF)"
+        embeddedText += "Content-Disposition: inline\(CRLF)"
         embeddedText += "\(CRLF)\(self)\(CRLF)"
         return embeddedText
     }
@@ -290,27 +290,27 @@ private extension String {
     }
 
     static func makeMixedEncryptedHeader(boundary: String) -> String {
-        return "CONTENT-TYPE: multipart/encrypted; boundary=\"\(boundary)\"; protocol=\"application/pgp-encrypted\"\(CRLF)"
+        return "Content-Type: multipart/encrypted; boundary=\"\(boundary)\"; protocol=\"application/pgp-encrypted\"\(CRLF)"
     }
     
     static func makePGPContentHeaders() -> String {
-        return "CONTENT-TYPE: text/plain; charset=\"utf-8\"\(CRLF)CONTENT-TRANSFER-ENCODING: 7bit\(CRLF)CONTENT-DISPOSITION: inline\(CRLF)"
+        return "Content-Type: text/plain; charset=\"utf-8\"\(CRLF)Content-Transfer-Encoding: 7bit\(CRLF)Content-Disposition: inline\(CRLF)"
     }
 
     // Header for a mixed type email.
     static func makeMixedHeader(boundary: String) -> String {
-        return "CONTENT-TYPE: multipart/mixed; boundary=\"\(boundary)\"\(CRLF)"
+        return "Content-Type: multipart/mixed; boundary=\"\(boundary)\"\(CRLF)"
     }
 
     // Header for an alternative email.
     static func makeAlternativeHeader(boundary: String) -> String {
-        return "CONTENT-TYPE: multipart/alternative; boundary=\"\(boundary)\"\(CRLF)"
+        return "Content-Type: multipart/alternative; boundary=\"\(boundary)\"\(CRLF)"
     }
 
     // Header for an attachment that is related to another attachment. (Such as an image attachment that can be
     // referenced by a related HTML attachment)
     static func makeRelatedHeader(boundary: String) -> String {
-        return "CONTENT-TYPE: multipart/related; boundary=\"\(boundary)\"\(CRLF)"
+        return "Content-Type: multipart/related; boundary=\"\(boundary)\"\(CRLF)"
     }
 
     // Added to a boundary to indicate the beginning of the corresponding section.

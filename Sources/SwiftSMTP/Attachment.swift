@@ -150,46 +150,47 @@ extension Attachment {
         switch type {
 
         case .data(_, let mime, let name, let inline):
-            dictionary["CONTENT-TYPE"] = mime
+            dictionary["Content-Type"] = mime
             var attachmentDisposition = inline ? "inline" : "attachment"
             if let mimeName = name.mimeEncoded {
                 attachmentDisposition.append("; filename=\"\(mimeName)\"")
             }
-            dictionary["CONTENT-DISPOSITION"] = attachmentDisposition
-            dictionary["CONTENT-TRANSFER-ENCODING"] = "BASE64"
+            dictionary["Content-Disposition"] = attachmentDisposition
+            dictionary["Content-Transfer-Encoding"] = "BASE64"
 
         case .pgp(_, let mime, let name, let inline):
-            dictionary["CONTENT-TYPE"] = mime
+            dictionary["Content-Type"] = mime
             var attachmentDisposition = inline ? "inline" : "attachment"
             if name.count > 0 {
-                if let mimeName = name.mimeEncoded {
-                    attachmentDisposition.append("; filename=\"\(mimeName)\"")
-                }
-                dictionary["CONTENT-DISPOSITION"] = attachmentDisposition
+                //if let mimeName = name.mimeEncoded {
+                //    attachmentDisposition.append("; filename=\"\(mimeName)\"")
+                //}
+                attachmentDisposition.append("; filename=\"\(name)\"")
+                dictionary["Content-Disposition"] = attachmentDisposition
             }
 
         case .file(_, let mime, let name, let inline):
-            dictionary["CONTENT-TYPE"] = mime
+            dictionary["Content-Type"] = mime
             var attachmentDisposition = inline ? "inline" : "attachment"
             if let mimeName = name.mimeEncoded {
                 attachmentDisposition.append("; filename=\"\(mimeName)\"")
             }
-            dictionary["CONTENT-DISPOSITION"] = attachmentDisposition
-            dictionary["CONTENT-TRANSFER-ENCODING"] = "BASE64"
+            dictionary["Content-Disposition"] = attachmentDisposition
+            dictionary["Content-Transfer-Encoding"] = "BASE64"
 
         case .html(_, let characterSet, _):
-            dictionary["CONTENT-TYPE"] = "text/html; charset=\(characterSet)"
-            dictionary["CONTENT-DISPOSITION"] = "inline"
-            dictionary["CONTENT-TRANSFER-ENCODING"] = "BASE64"
+            dictionary["Content-Type"] = "text/html; charset=\(characterSet)"
+            dictionary["Content-Disposition"] = "inline"
+            dictionary["Content-Transfer-Encoding"] = "BASE64"
 
         }
 
 
         for (key, value) in additionalHeaders {
             let keyUppercased = key.uppercased()
-            if  keyUppercased != "CONTENT-TYPE" &&
-                keyUppercased != "CONTENT-DISPOSITION" &&
-                keyUppercased != "CONTENT-TRANSFER-ENCODING" {
+            if  keyUppercased != "Content-Type" &&
+                keyUppercased != "Content-Disposition" &&
+                keyUppercased != "Content-Transfer-Encoding" {
                 dictionary[keyUppercased] = value
             }
         }
