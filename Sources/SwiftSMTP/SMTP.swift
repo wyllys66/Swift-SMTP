@@ -103,8 +103,7 @@ public struct SMTP {
     /// - Parameters:
     ///     - mail: `Mail` object to send.
     ///     - completion: Callback when sending finishes. `Error` is nil on success. (optional)
-    public func verifyAuth(completion:((_ res: Bool, _ error: Error?) -> Void)) {
-        var res: Bool = false;
+    public func verifyAuth(completion: ((_ res: Bool, _ error: Error?) -> Void)) {
         do {
             let socket = try SMTPSocket(
                 hostname: hostname,
@@ -117,13 +116,12 @@ public struct SMTP {
                 domainName: domainName,
                 timeout: timeout
             )
-            res = true;
+            _ = try? socket.send(.quit)
+            socket.close()
+            completion(true, nil)
         } catch {
-            NSLog("Error: \(error)")
-            completion(false, error);
-            return
+            completion(false, error)
         }
-        completion(res, nil);
     }
 
     /// Send multiple emails.
@@ -172,5 +170,16 @@ public struct SMTP {
         } catch {
             completion?([], mails.map { ($0, error) })
         }
+    }
+
+    /// Send a single email.
+    ///
+    /// - Parameters:
+    ///     - mail: `Mail` to send.
+    ///     - completion: Callback when sending finishes. `Error` is nil on success. (optional)
+    public func send(_ mail: Mail, completion: ((Error?) -> Void)? = nil) {
+        send([mail], completion: { _, failed in
+            completion?(failed.first?.1)
+        })
     }
 }

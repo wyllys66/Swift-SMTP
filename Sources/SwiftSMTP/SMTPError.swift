@@ -53,6 +53,15 @@ public enum SMTPError: Error, CustomStringConvertible {
 
     /// STARTTLS was required but the server did not request it.
     case requiredSTARTTLS
+
+    /// `Mail.pgp` was set but no PGP attachment was supplied for the encrypted body part.
+    case missingPGPAttachment
+
+    /// Writing to an `OutputStream` failed without surfacing a `streamError`.
+    case streamWriteFailed
+
+    /// Server closed the connection before sending a complete SMTP response.
+    case incompleteResponse(response: String)
     
     /// Description of the `SMTPError`.
     public var description: String {
@@ -67,6 +76,9 @@ public enum SMTPError: Error, CustomStringConvertible {
         case .convertDataUTF8Fail(let buf): return "Error converting Data read from socket to a String: \(buf)."
         case .invalidEmail(let email): return "Invalid email provided for User: \(email)."
         case .requiredSTARTTLS: return "STARTTLS was required but the server did not issue a STARTTLS command."
+        case .missingPGPAttachment: return "Mail.pgp was set but no PGP attachment was supplied for the encrypted body part."
+        case .streamWriteFailed: return "Writing to OutputStream failed."
+        case .incompleteResponse(let r): return "Server closed connection before sending a complete response. Partial: \(r)"
         }
     }
 

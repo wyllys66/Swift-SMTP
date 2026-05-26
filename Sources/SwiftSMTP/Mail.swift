@@ -58,16 +58,15 @@ public struct Mail {
         return "<\(uuid).Swift-SMTP@\(hostname)>"
     }
 
-    /// Hostname from the email address.
+    /// Hostname from the email address. Falls back to `localhost` when the
+    /// sender address has no `@` — keeps `Mail.id` from trapping on
+    /// malformed input.
     public var hostname: String {
         let fullEmail = from.email
-#if swift(>=4.2)
-        let atIndex = fullEmail.firstIndex(of: "@")
-#else
-        let atIndex = fullEmail.index(of: "@")
-#endif
-        let hostStart = fullEmail.index(after: atIndex!)
-        return String(fullEmail[hostStart...])
+        guard let atIndex = fullEmail.firstIndex(of: "@") else {
+            return "localhost"
+        }
+        return String(fullEmail[fullEmail.index(after: atIndex)...])
     }
 
     /// Initializes a `Mail` object.
@@ -121,36 +120,37 @@ public struct Mail {
         return (nil, attachments)
     }
 
-    private var headersDictionary: [String: String] {
-        var dictionary = [String: String]()
-        dictionary["MESSAGE-ID"] = id
-        dictionary["DATE"] = Date().smtpFormatted
-        dictionary["FROM"] = from.mime
-        dictionary["TO"] = to.map { $0.mime }.joined(separator: ", ")
-
+    // Built in canonical RFC 5322 §3.6 order so output is deterministic across
+    // runs. Custom headers follow the well-known ones, sorted alphabetically;
+    // last-write-wins on case-insensitive duplicates.
+    private var orderedHeaders: [(String, String)] {
+        var headers: [(String, String)] = []
+        headers.append(("DATE", Date().smtpFormatted))
+        headers.append(("FROM", from.mime))
+        headers.append(("TO", to.map { $0.mime }.joined(separator: ", ")))
         if !cc.isEmpty {
-            dictionary["CC"] = cc.map { $0.mime }.joined(separator: ", ")
+            headers.append(("CC", cc.map { $0.mime }.joined(separator: ", ")))
         }
+        headers.append(("SUBJECT", subject.mimeEncoded ?? ""))
+        headers.append(("MESSAGE-ID", id))
+        headers.append(("MIME-VERSION", "1.0 (Swift-SMTP)"))
 
-        dictionary["SUBJECT"] = subject.mimeEncoded ?? ""
-        dictionary["MIME-VERSION"] = "1.0 (Swift-SMTP)"
-
+        let reserved: Set<String> = ["CONTENT-TYPE", "CONTENT-DISPOSITION", "CONTENT-TRANSFER-ENCODING"]
+        var custom: [String: String] = [:]
         for (key, value) in additionalHeaders {
-            let keyUppercased = key.uppercased()
-            if  keyUppercased != "CONTENT-TYPE" &&
-                keyUppercased != "CONTENT-DISPOSITION" &&
-                keyUppercased != "CONTENT-TRANSFER-ENCODING" {
-                dictionary[keyUppercased] = value
+            let upper = key.uppercased()
+            if !reserved.contains(upper) {
+                custom[upper] = value
             }
         }
-
-        return dictionary
+        for key in custom.keys.sorted() {
+            headers.append((key, custom[key]!))
+        }
+        return headers
     }
 
     public var headersString: String {
-        return headersDictionary.map { (key, value) in
-            return "\(key): \(value)"
-            }.joined(separator: CRLF)
+        return orderedHeaders.map { "\($0.0): \($0.1)" }.joined(separator: CRLF)
     }
 
     var hasAttachment: Bool {
@@ -188,8 +188,11 @@ extension Mail {
 }
 
 extension DateFormatter {
+    // RFC 5322 §3.3 requires English day/month names regardless of the host
+    // system locale, so pin to POSIX.
     static let smtpDateFormatter: DateFormatter = {
         let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "EEE, d MMM yyyy HH:mm:ss ZZZ"
         return formatter
     }()
@@ -198,5 +201,14 @@ extension DateFormatter {
 extension Date {
     var smtpFormatted: String {
         return DateFormatter.smtpDateFormatter.string(from: self)
+    }
+}
+
+public extension Mail {
+    /// Render this `Mail`'s MIME body (Content-Type onward, no message headers
+    /// and no SMTP envelope) to the given `OutputStream`. Useful for offline
+    /// composition or for piping through a non-SMTP transport.
+    func render(to stream: OutputStream) throws {
+        try DataSender(stream: stream).send(self, includeHeaders: false)
     }
 }

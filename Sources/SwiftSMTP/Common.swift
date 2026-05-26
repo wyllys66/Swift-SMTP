@@ -21,7 +21,6 @@ enum Result<T, Error> {
     case failure(Error)
 }
 
-let cache = NSCache<AnyObject, AnyObject>()
 let CRLF = "\r\n"
 
 extension String {

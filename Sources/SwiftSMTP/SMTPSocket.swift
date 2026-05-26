@@ -75,13 +75,36 @@ struct SMTPSocket {
 
 private extension SMTPSocket {
     func readFromSocket() throws -> String {
+        // An SMTP reply can span multiple TCP segments. Keep reading until the
+        // final line of a (possibly multi-line) reply arrives — that line uses
+        // a space after the response code, while continuation lines use a dash
+        // (RFC 5321 §4.2.1).
         var buf = Data()
-        _ = try socket.read(into: &buf)
-        guard let responses = String(data: buf, encoding: .utf8) else {
-            throw SMTPError.convertDataUTF8Fail(data: buf)
+        while true {
+            let bytesRead = try socket.read(into: &buf)
+            guard let responses = String(data: buf, encoding: .utf8) else {
+                throw SMTPError.convertDataUTF8Fail(data: buf)
+            }
+            if SMTPSocket.responseIsComplete(responses) {
+                Log.debug(responses)
+                return responses
+            }
+            if bytesRead == 0 {
+                throw SMTPError.incompleteResponse(response: responses)
+            }
         }
-        Log.debug(responses)
-        return responses
+    }
+
+    static func responseIsComplete(_ text: String) -> Bool {
+        guard text.hasSuffix(CRLF) else { return false }
+        let trimmed = text.dropLast(2)
+        guard let lastLine = trimmed.components(separatedBy: CRLF).last,
+              lastLine.count >= 4 else {
+            return false
+        }
+        let codeChars = lastLine.prefix(3)
+        let separator = lastLine[lastLine.index(lastLine.startIndex, offsetBy: 3)]
+        return codeChars.allSatisfy { $0.isNumber } && separator == " "
     }
 
     @discardableResult
@@ -148,12 +171,14 @@ private extension SMTPSocket {
     }
 
     func getAuthMethod(authMethods: [String: AuthMethod], serverOptions: [Response], hostname: String) throws -> AuthMethod {
+        // SASL mechanism names are case-insensitive (RFC 4954 §4); some
+        // servers advertise them lowercase.
         for option in serverOptions {
             let components = option.message.components(separatedBy: " ")
-            if components.first == "AUTH" {
+            if components.first?.uppercased() == "AUTH" {
                 let _authMethods = components.dropFirst()
                 for authMethod in _authMethods {
-                    if let matchingAuthMethod = authMethods[authMethod] {
+                    if let matchingAuthMethod = authMethods[authMethod.uppercased()] {
                         return matchingAuthMethod
                     }
                 }

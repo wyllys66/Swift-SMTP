@@ -50,5 +50,6 @@ XCTMain([
     testCase(TestDataSender.allTests.shuffled()),
     testCase(TestMailSender.allTests.shuffled()),
     testCase(TestMiscellaneous.allTests.shuffled()),
+    testCase(TestPGPMIME.allTests.shuffled()),
     testCase(TestSMTPSocket.allTests.shuffled()),
     testCase(TestTLSMode.allTests.shuffled())].shuffled())

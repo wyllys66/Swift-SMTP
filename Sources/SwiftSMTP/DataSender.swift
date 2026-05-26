@@ -42,7 +42,12 @@ struct DataSender {
         if includeHeaders {
             try sendHeaders(mail.headersString)
         }
-        if mail.hasAttachment {
+        if mail.pgp {
+            // Route PGP first — even with no attachments — so the
+            // missingPGPAttachment guard fires instead of silently emitting a
+            // plaintext body.
+            try sendPGPMIME(mail)
+        } else if mail.hasAttachment {
             try sendMixed(mail)
         } else {
             try sendText(mail.text)
@@ -60,28 +65,15 @@ extension DataSender {
     func sendText(_ text: String) throws {
         try send(text.embedded)
     }
-    // Add custom/default headers to a `Mail`'s text and write it to the socket.
-    func sendPGP(_ text: String) throws {
-        try send(text);
-    }
 
-    // Send `mail`'s content that is more than just plain text
+    // Send `mail`'s content that is more than just plain text. Callers should
+    // route `mail.pgp == true` to `sendPGPMIME` directly — this path is for
+    // non-encrypted multipart/mixed only.
     func sendMixed(_ mail: Mail) throws {
         let boundary = String.makeBoundary()
-        
-        var mixedHeader: String
-        if mail.pgp {
-            mixedHeader = String.makeMixedEncryptedHeader(boundary: boundary)
-        } else {
-            mixedHeader = String.makeMixedHeader(boundary: boundary)
-        }
-
-        try send(mixedHeader)
-        if !mail.pgp || mail.text.count > 0 {
-            try send(boundary.startLine)
-        }
+        try send(String.makeMixedHeader(boundary: boundary))
+        try send(boundary.startLine)
         try sendAlternative(for: mail)
-
         try sendAttachments(mail.attachments, boundary: boundary)
     }
 
@@ -103,15 +95,7 @@ extension DataSender {
             return
         }
 
-        if mail.pgp {
-            if mail.text.count > 0 {
-                let pgpheader = String.makePGPContentHeaders()
-                try send(pgpheader)
-                try sendPGP(mail.text + CRLF)
-            }
-        } else {
-            try sendText(mail.text)
-        }
+        try sendText(mail.text)
     }
 
     // Sends the attachments of a `Mail`.
@@ -121,6 +105,20 @@ extension DataSender {
             try sendAttachment(attachment)
         }
         try send(boundary.endLine)
+    }
+
+    // Frame the caller's attachments as an RFC 3156 §4 `multipart/encrypted`
+    // body. The caller is responsible for supplying both required parts (the
+    // `application/pgp-encrypted` Version part and the ciphertext) as
+    // attachments in order; the library only frames them and refuses to emit
+    // `mail.text` so no plaintext leaks alongside the encrypted body.
+    func sendPGPMIME(_ mail: Mail) throws {
+        guard !mail.attachments.isEmpty else {
+            throw SMTPError.missingPGPAttachment
+        }
+        let boundary = String.makeBoundary()
+        try send(String.makeMixedEncryptedHeader(boundary: boundary))
+        try sendAttachments(mail.attachments, boundary: boundary)
     }
 
     // Send the `attachment`.
@@ -151,100 +149,30 @@ extension DataSender {
         }
     }
 
-    // Send a PGP attachment.
+    // Send a PGP attachment. The body is already ASCII-armored, so no encoding
+    // step is needed and there is nothing worth caching.
     func sendPGPAttachment(_ pgp: String) throws {
-        #if os(macOS)
-        if let encodedData = cache.object(forKey: pgp as AnyObject) as? Data {
-            return try send(encodedData)
-        }
-        #else
-        if let data = cache.object(forKey: NSString(string: pgp) as AnyObject) as? Data {
-            return try send(data)
-        }
-        #endif
-
         try send(pgp)
-
-        #if os(macOS)
-            cache.setObject(encodedData as AnyObject, forKey: data as AnyObject)
-        #else
-            cache.setObject(NSString(string: pgp) as AnyObject, forKey: NSString(string: pgp) as AnyObject)
-        #endif
     }
 
-    // Send a data attachment. Data must be base 64 encoded before sending.
-    // Checks if the base 64 encoded version has been cached first.
+    // Send a data attachment, base64-encoded.
     func sendData(_ data: Data) throws {
-        #if os(macOS)
-            if let encodedData = cache.object(forKey: data as AnyObject) as? Data {
-                return try send(encodedData)
-            }
-        #else
-        
-            if let encodedData = cache.object(forKey: NSData(data: data) as AnyObject) as? Data {
-                return try send(encodedData)
-            }
-        #endif
-
-        let encodedData = data.base64EncodedData(options: .lineLength76Characters)
-        try send(encodedData)
-
-        #if os(macOS)
-            cache.setObject(encodedData as AnyObject, forKey: data as AnyObject)
-        #else
-            cache.setObject(NSData(data: encodedData) as AnyObject, forKey: NSData(data: data) as AnyObject)
-        #endif
+        try send(data.base64EncodedData(options: .lineLength76Characters))
     }
 
-    // Sends a local file at the given path. File must be base 64 encoded before sending. Checks the cache first.
-    // Throws an error if file could not be found.
+    // Send a local file, base64-encoded.
     func sendFile(at path: String) throws {
-        #if os(macOS)
-            if let data = cache.object(forKey: path as AnyObject) as? Data {
-                return try send(data)
-            }
-        #else
-            if let data = cache.object(forKey: NSString(string: path) as AnyObject) as? Data {
-                return try send(data)
-            }
-        #endif
-
         guard let file = FileHandle(forReadingAtPath: path) else {
             throw SMTPError.fileNotFound(path: path)
         }
-
-        let data = file.readDataToEndOfFile().base64EncodedData(options: .lineLength76Characters)
-        try send(data)
-        file.closeFile()
-
-        #if os(macOS)
-            cache.setObject(data as AnyObject, forKey: path as AnyObject)
-        #else
-            cache.setObject(NSData(data: data) as AnyObject, forKey: NSString(string: path) as AnyObject)
-        #endif
+        defer { file.closeFile() }
+        try send(file.readDataToEndOfFile().base64EncodedData(options: .lineLength76Characters))
     }
 
-    // Send an HTML attachment. HTML must be base 64 encoded before sending.
-    // Checks if the base 64 encoded version is in cache first.
+    // Send an HTML attachment, base64-encoded.
     func sendHTML(_ html: String) throws {
-        #if os(macOS)
-            if let encodedHTML = cache.object(forKey: html as AnyObject) as? String {
-                return try send(encodedHTML)
-            }
-        #else
-            if let encodedHTML = cache.object(forKey: NSString(string: html) as AnyObject) as? String {
-                return try send(encodedHTML)
-            }
-        #endif
-
-        let encodedHTML = html.data(using: .utf8)?.base64EncodedData(options: .lineLength76Characters) ?? Data()
-        try send(encodedHTML)
-
-        #if os(macOS)
-            cache.setObject(encodedHTML as AnyObject, forKey: html as AnyObject)
-        #else
-            cache.setObject(NSData(data: encodedHTML) as AnyObject, forKey: NSString(string: html) as AnyObject)
-        #endif
+        let encoded = html.data(using: .utf8)?.base64EncodedData(options: .lineLength76Characters) ?? Data()
+        try send(encoded)
     }
 }
 
@@ -292,10 +220,6 @@ private extension String {
     static func makeMixedEncryptedHeader(boundary: String) -> String {
         return "Content-Type: multipart/encrypted; boundary=\"\(boundary)\"; protocol=\"application/pgp-encrypted\"\(CRLF)"
     }
-    
-    static func makePGPContentHeaders() -> String {
-        return "Content-Type: text/plain; charset=\"utf-8\"\(CRLF)Content-Transfer-Encoding: 7bit\(CRLF)Content-Disposition: inline\(CRLF)"
-    }
 
     // Header for a mixed type email.
     static func makeMixedHeader(boundary: String) -> String {
@@ -329,26 +253,23 @@ extension OutputStream {
     func write(_ data: Data) throws {
         var remaining = data[...]
         while !remaining.isEmpty {
-            let bytesWritten = remaining.withUnsafeBytes { buf in
-                // The force unwrap is safe because we know that `remaining` is
-                // not empty. The `assumingMemoryBound(to:)` is there just to
-                // make Swift’s type checker happy. This would be unnecessary if
-                // `write(_:maxLength:)` were (as it should be IMO) declared
-                // using `const void *` rather than `const uint8_t *`.
-                self.write(
+            let bytesWritten = remaining.withUnsafeBytes { buf -> Int in
+                // baseAddress is non-nil because `remaining` is non-empty.
+                // assumingMemoryBound is there because Foundation declares the
+                // pointer as `UnsafePointer<UInt8>` rather than `void *`.
+                return self.write(
                     buf.baseAddress!.assumingMemoryBound(to: UInt8.self),
                     maxLength: buf.count
                 )
             }
-            guard bytesWritten >= 0 else {
-                // … if -1, throw `streamError` …
-                // … if 0, well, that’s a complex question …
-                if let error = self.streamError {
-                    print(error.localizedDescription ?? "Unknown error")
-                }
-                fatalError()
+            if bytesWritten > 0 {
+                remaining = remaining.dropFirst(bytesWritten)
+            } else {
+                // 0 means no space without blocking; <0 means error. Either
+                // way we can't make progress — surface to the caller instead
+                // of spinning or aborting the process.
+                throw self.streamError ?? SMTPError.streamWriteFailed
             }
-            remaining = remaining.dropFirst(bytesWritten)
         }
     }
 }

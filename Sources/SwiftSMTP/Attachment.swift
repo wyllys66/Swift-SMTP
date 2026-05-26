@@ -188,9 +188,9 @@ extension Attachment {
 
         for (key, value) in additionalHeaders {
             let keyUppercased = key.uppercased()
-            if  keyUppercased != "Content-Type" &&
-                keyUppercased != "Content-Disposition" &&
-                keyUppercased != "Content-Transfer-Encoding" {
+            if  keyUppercased != "CONTENT-TYPE" &&
+                keyUppercased != "CONTENT-DISPOSITION" &&
+                keyUppercased != "CONTENT-TRANSFER-ENCODING" {
                 dictionary[keyUppercased] = value
             }
         }
