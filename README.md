@@ -193,6 +193,84 @@ smtp.send([mail1, mail2],
 )
 ```
 
+### Send a PGP/MIME encrypted message
+
+Swift-SMTP can frame an [RFC 3156](https://datatracker.ietf.org/doc/html/rfc3156) `multipart/encrypted` body when `Mail.pgp` is set. Encryption itself is **out of scope** — bring your own OpenPGP implementation (e.g. ObjectivePGP). The library's job is the MIME envelope: it labels the body `multipart/encrypted; protocol="application/pgp-encrypted"` and emits the two body parts in order, refusing to emit `Mail.text` so plaintext cannot leak alongside the ciphertext.
+
+RFC 3156 §4 requires exactly two body parts:
+
+1. `application/pgp-encrypted` containing `Version: 1`
+2. The ASCII-armored ciphertext (typically `application/octet-stream`)
+
+Both parts are supplied by the caller as `Attachment`s, in that order:
+
+```swift
+// 1. The required Version part.
+let versionPart = Attachment(
+    pgp: "Version: 1",
+    mime: "application/pgp-encrypted",
+    name: ""
+)
+
+// 2. The ciphertext. `cipherText` is the ASCII-armored output of your PGP
+//    encryption step ("-----BEGIN PGP MESSAGE----- ... -----END PGP MESSAGE-----").
+let ciphertextPart = Attachment(
+    pgp: cipherText,
+    mime: "application/octet-stream",
+    name: "encrypted.asc"
+)
+
+let mail = Mail(
+    from: alice,
+    to: [bob],
+    subject: "Encrypted message",
+    text: "",                // ignored when pgp:true
+    pgp: true,
+    attachments: [versionPart, ciphertextPart]
+)
+
+smtp.send(mail) { error in
+    if let error = error { print(error) }
+}
+```
+
+On the wire this produces:
+
+```
+Content-Type: multipart/encrypted; boundary="..."; protocol="application/pgp-encrypted"
+
+--<boundary>
+Content-Type: application/pgp-encrypted
+
+Version: 1
+--<boundary>
+Content-Type: application/octet-stream
+Content-Disposition: inline; filename="encrypted.asc"
+
+-----BEGIN PGP MESSAGE-----
+...ASCII-armored ciphertext...
+-----END PGP MESSAGE-----
+--<boundary>--
+```
+
+**Notes:**
+
+- `Mail.text` is dropped when `pgp == true`. Any cleartext you want the recipient to see must be inside the encrypted payload.
+- If `attachments` is empty, `send` returns `SMTPError.missingPGPAttachment` — the library will not emit a `multipart/encrypted` envelope with no body parts.
+- The library does not validate the MIME types of the two parts; the caller is responsible for supplying a correct Version part and ciphertext part.
+
+#### Rendering without sending
+
+`Mail.render(to:)` writes the fully-formed MIME body (Content-Type onward, no SMTP envelope and no message headers) to any `OutputStream`. Useful when you want to compose or inspect the body offline — for example, when feeding the *pre-encryption* MIME structure (a `multipart/mixed` of text + attachments, with `pgp: false`) into your encryption step:
+
+```swift
+let stream = OutputStream(toMemory: ())
+stream.open()
+try mail.render(to: stream)
+let data = stream.property(forKey: .dataWrittenToMemoryStreamKey) as! Data
+let body = String(decoding: data, as: UTF8.self)
+```
+
 ## Acknowledgements
 
 Inspired by [Hedwig](https://github.com/onevcat/Hedwig) and [Perfect-SMTP](https://github.com/PerfectlySoft/Perfect-SMTP).
