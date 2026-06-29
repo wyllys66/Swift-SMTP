@@ -15,6 +15,7 @@
  **/
 
 import Foundation
+import LoggerAPI
 
 // Used to send the content of an email--headers, text, and attachments.
 // Should only be invoked after sending the `DATA` command to the server.
@@ -180,10 +181,10 @@ private extension DataSender {
     // Write `text` to the socket.
     func send(_ text: String) throws {
         if (socket != nil) {
-            //print("SEND: \(text)")
+            Log.debug("SEND: \(text)")
             try socket?.write(text)
         } else if (stream != nil) {
-            //print("STREAM: \(text)")
+            Log.debug("STREAM: \(text)")
             let final = text + CRLF
             try self.stream?.write(final.data(using: .utf8)!)
         }
@@ -192,10 +193,10 @@ private extension DataSender {
     // Write `data` to the socket or stream.
     func send(_ data: Data) throws {
         if (socket != nil) {
-            //print("SEND: data \(data.count) bytes")
+            Log.debug("SEND: data \(data.count) bytes")
             try socket?.write(data)
         } else if (stream != nil) {
-            //print("STREAM: data \(data.count) bytes")
+            Log.debug("STREAM: data \(data.count) bytes")
             try self.stream?.write(data)
         }
     }
